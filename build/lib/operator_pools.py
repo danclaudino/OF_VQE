@@ -596,16 +596,20 @@ class sf_rohf_SD(OperatorPool):
 # Opposite spins 
 
         for i in range(0, n_occ_a - n_occ_b):
-            ia = 2*i
+            ia = i
+            #ia = 2*i
 
             for j in range(0, n_occ_a - n_occ_b):
-                ja = 2*j
+                ja = j
+                #ja = 2*j
 
                 for a in range(0, n_occ_a - n_occ_b):
-                    ab = 2*a + 1 
+                    ab = n_occ_a + a 
+                    #ab = 2*a + 1 
 
                     for b in range(0, n_occ_a - n_occ_b):
-                        bb = 2*b + 1
+                        bb = n_occ_a + b 
+                        #bb = 2*b + 1
 
                         termA =  FermionOperator(((ab,1),(ia,0),(bb,1),(ja,0)), 1.0)
                         print(termA)
@@ -621,6 +625,17 @@ class sf_rohf_SD(OperatorPool):
                         if termA.many_body_order() > 0:
                             termA = termA/np.sqrt(coeffA)
                             self.fermi_ops.append(termA)
+
+        #Normalize
+        coeffA = 0
+        for t in termA.terms:
+            coeff_t = termA.terms[t]
+            coeffA += coeff_t * coeff_t
+        
+        if termA.many_body_order() > 0:
+            termA = termA/np.sqrt(coeffA)
+            self.fermi_ops.append(termA)
+
 
         self.n_ops = len(self.fermi_ops)
         print(" Number of operators: ", self.n_ops)
