@@ -25,6 +25,7 @@ def adapt_vqe(geometry,
         adapt_maxiter   = 200,
         pool            = operator_pools.singlet_GSD(),
         reference       = 'rhf',
+        brueckner       = 0,
         ref_state       = None,
         spin_adapt      = True,
         psi4_filename   = "psi4_%12.12f"%random.random()
@@ -37,6 +38,7 @@ def adapt_vqe(geometry,
                 run_mp2=0, 
                 run_cisd=0, 
                 run_ccsd = 0, 
+                run_bccd = brueckner, # Brueckner CCD
                 run_fci=1, 
                 delete_input=1)
     pool.init(molecule)
@@ -46,6 +48,8 @@ def adapt_vqe(geometry,
     #print(' MP2 energy     %20.16f au' %(molecule.mp2_energy))
     #print(' CISD energy    %20.16f au' %(molecule.cisd_energy))
     #print(' CCSD energy    %20.16f au' %(molecule.ccsd_energy))
+    if brueckner == 1:
+        print(' BCCD energy     %20.16f au' %(molecule.bccd_energy))
     if reference == 'rhf':
         print(' FCI energy     %20.16f au' %(molecule.fci_energy))
 
@@ -166,6 +170,7 @@ def ucc(geometry,
         spin_adapt      = True,
         reference       = 'rhf',
         ref_state       = None,
+        k               = 1, # # of products of unitaries in k-UpCCGSD
         psi4_filename   = "psi4_%12.12f"%random.random()
         ):
 # {{{
@@ -177,7 +182,7 @@ def ucc(geometry,
                 run_mp2=0, 
                 run_cisd=0, 
                 run_ccsd = 0, 
-                run_fci=0, 
+                run_fci=1, 
                 delete_input=1)
     pool.init(molecule)
     print(" Basis: ", basis)
@@ -186,7 +191,7 @@ def ucc(geometry,
     #print(' MP2 energy     %20.16f au' %(molecule.mp2_energy))
     #print(' CISD energy    %20.16f au' %(molecule.cisd_energy))
     #print(' CCSD energy    %20.16f au' %(molecule.ccsd_energy))
-    #print(' FCI energy     %20.16f au' %(molecule.fci_energy))
+    print(' FCI energy     %20.16f au' %(molecule.fci_energy))
 
     #Build p-h reference and map it to JW transform
     if ref_state == None:
@@ -200,11 +205,12 @@ def ucc(geometry,
     hamiltonian = openfermion.transforms.get_sparse_operator(hamiltonian_op)
 
     #Thetas
-    parameters = [0]*pool.n_ops 
-
+    #parameters = [0]*pool.n_ops 
+    parameters = np.random.rand(2*pool.n_ops)
+    print(" Initial parameters: %s" % parameters)
     pool.generate_SparseMatrix()
     
-    ucc = UCC(hamiltonian, pool.spmat_ops, reference_ket, parameters)
+    ucc = UCC(hamiltonian, pool.spmat_ops, reference_ket, parameters, k)
     
     opt_result = scipy.optimize.minimize(ucc.energy, 
                 parameters, options = {'gtol': 1e-6, 'disp':True}, 

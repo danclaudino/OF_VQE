@@ -13,12 +13,13 @@ class Variational_Ansatz:
     """
     Assumes that we have some operator, which will be applied in a specific way G*psi or exp{iG}*psi to create a trial state
     """
-    def __init__(self,_H, _G, _ref, _params):
+    def __init__(self,_H, _G, _ref, _params, _k=1):
         """
         _H      : sparse matrix
         _G_ops  : list of sparse matrices - each corresponds to a variational parameter
         _ref    : reference state vector
         _params : initialized list of parameters
+        _k      : number of products of unitaries in k-UpCCGSD
         """
 
         self.H = _H
@@ -26,7 +27,8 @@ class Variational_Ansatz:
         self.ref = cp.deepcopy(_ref)
         self.curr_params = _params 
         self.n_params = len(self.curr_params)
-        self.hilb_dim = self.H.shape[0] 
+        self.hilb_dim = self.H.shape[0]
+        self.products = _k
         
         self.iter = 0
         self.energy_per_iteration = []
@@ -132,7 +134,10 @@ class UCC(Variational_Ansatz):
         new_state = self.ref * 1.0
         for mat_op in range(0,len(self.G)):
             generator = generator+parameters[mat_op]*self.G[mat_op]
-        new_state = scipy.sparse.linalg.expm_multiply(generator, self.ref)
+        #new_state = scipy.sparse.linalg.expm_multiply(generator, self.ref)
+        new_state = self.ref
+        for n_product in range(self.products):
+            new_state = scipy.sparse.linalg.expm_multiply(generator, new_state)
         return new_state
     
     
