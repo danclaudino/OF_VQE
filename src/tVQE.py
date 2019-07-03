@@ -19,13 +19,13 @@ class Variational_Ansatz:
         _G_ops  : list of sparse matrices - each corresponds to a variational parameter
         _ref    : reference state vector
         _params : initialized list of parameters
-        _k      : number of products of unitaries in k-UpCCGSD
+        _k      : number of replicas of the trotterized UpCCGSD ansatz (k-UpCCGSD)
         """
 
         self.H = _H
-        self.G = _G
+        self.G = cp.deepcopy(_G)
         self.ref = cp.deepcopy(_ref)
-        self.curr_params = _params 
+        self.curr_params = cp.deepcopy(_params)
         self.n_params = len(self.curr_params)
         self.hilb_dim = self.H.shape[0]
         self.products = _k
@@ -79,8 +79,10 @@ class tUCCSD(Variational_Ansatz):
         exp{A1}exp{A2}exp{A3}...exp{An}|ref>
         """
         new_state = self.ref * 1.0
-        for k in reversed(range(0, len(parameters))):
-            new_state = scipy.sparse.linalg.expm_multiply((parameters[k]*self.G[k]), new_state)
+        for n_product in range(self.products):
+            for k in reversed(range(0, int(len(parameters)/self.products))):
+                new_state = scipy.sparse.linalg.expm_multiply((parameters[k]*self.G[k]), new_state)
+
         return new_state
     
     
@@ -134,8 +136,7 @@ class UCC(Variational_Ansatz):
         new_state = self.ref * 1.0
         for mat_op in range(0,len(self.G)):
             generator = generator+parameters[mat_op]*self.G[mat_op]
-        #new_state = scipy.sparse.linalg.expm_multiply(generator, self.ref)
-        new_state = self.ref
+        
         for n_product in range(self.products):
             new_state = scipy.sparse.linalg.expm_multiply(generator, new_state)
         return new_state
