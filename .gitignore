@@ -5,3 +5,5 @@ dist/*
 build/*
 calcs/*
 examples/*
+save/*
+*.txt

@@ -2,6 +2,7 @@ import openfermion
 import numpy as np
 import copy as cp
 import itertools
+import scipy
 
 from openfermion import *
 
@@ -74,6 +75,24 @@ class OperatorPool:
         opstring = " %18s : %s" %(opstring, spins)
         return opstring
 
+    def overlap_gradient_i(self, op_index, curr_state, fci):
+
+        op = self.spmat_ops[op_index]
+        op_v = op.dot(curr_state)
+
+        index = scipy.sparse.find(op_v)[0]
+        coeff = scipy.sparse.find(op_v)[2]
+        grad = 0.0
+        for i in range(len(index)):
+            grad += fci[index[i]]*coeff[i]
+
+        grad = np.absolute(grad)
+        opstring = self.get_string_for_term(self.fermi_ops[op_index])
+
+        if abs(grad) > self.gradient_print_thresh:
+            print(" %4i %12.8f %s" %(op_index, grad, opstring) )
+    
+        return grad 
 
 
     def compute_gradient_i(self,i,v,sig):
@@ -897,15 +916,16 @@ class UpCCGSD(OperatorPool):
 
         # Although both singles and doubles loop over the same indeces
         # I decided to split into two in order to better separate them
-        for p in range(0,self.n_orb):
-            pa = 2*p
-            pb = 2*p + 1
+        #for p in range(0,self.n_orb):
+            #pa = 2*p
+            #pb = 2*p + 1
  
-            for q in range(p,self.n_orb):
-                qa = 2*q
-                qb = 2*q + 1
+            #for q in range(p,self.n_orb):
+                #qa = 2*q
+                #qb = 2*q + 1
         
                 termA =  FermionOperator(((pa,1),(qa,0),(pb,1),(qb,0)), 1.0)
+                termA +=  FermionOperator(((pb,1),(qb,0),(pa,1),(qa,0)), 1.0)
                 termA -= hermitian_conjugated(termA)
                 termA = normal_ordered(termA)
                 
