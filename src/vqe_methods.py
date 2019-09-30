@@ -39,16 +39,21 @@ def adapt_vqe(geometry,
         single_vqe      = False,
         chk_ops         = [],
         energy_thresh   = 1e-6,
+        fci_overlap     = False,
         psi4_filename   = "psi4_%12.12f"%random.random()
         ):
 # {{{
     start_time = time.time()
     molecule = openfermion.hamiltonians.MolecularData(geometry, basis, multiplicity, reference = reference, hf_stability = hf_stability)
     molecule.filename = psi4_filename
+    if cisd_nat_orb == 1:
+        cisd = 1
+    else:
+        cisd = 0
     molecule = openfermionpsi4.run_psi4(molecule, 
                 run_scf = 1, 
                 run_mp2=0, 
-                run_cisd=0, 
+                run_cisd=cisd, 
                 run_ccsd = 0, 
                 run_bccd = brueckner, # Brueckner CCD
                 run_fci=1, 
@@ -56,16 +61,19 @@ def adapt_vqe(geometry,
                 cisd_no = cisd_nat_orb,
                 delete_input=1)
     pool.init(molecule)
-    print(" Basis: ", basis)
 
-    print(' HF energy      %20.16f au' %(molecule.hf_energy))
-    #print(' MP2 energy     %20.16f au' %(molecule.mp2_energy))
-    #print(' CISD energy    %20.16f au' %(molecule.cisd_energy))
-    #print(' CCSD energy    %20.16f au' %(molecule.ccsd_energy))
-    if brueckner == 1:
-        print(' BCCD energy     %20.16f au' %(molecule.bccd_energy))
-    if reference == 'rhf':
-        print(' FCI energy     %20.16f au' %(molecule.fci_energy))
+    if fci_overlap == False:
+        print(" Basis: ", basis)
+        print(' HF energy      %20.16f au' %(molecule.hf_energy))
+        #print(' MP2 energy     %20.16f au' %(molecule.mp2_energy))
+        #print(' CISD energy    %20.16f au' %(molecule.cisd_energy))
+        #print(' CCSD energy    %20.16f au' %(molecule.ccsd_energy))
+        if brueckner == 1:
+            print(' BCCD energy     %20.16f au' %(molecule.bccd_energy))
+        if cisd == 1:
+            print(' CISD energy     %20.16f au' %(molecule.cisd_energy))
+        if reference == 'rhf':
+            print(' FCI energy     %20.16f au' %(molecule.fci_energy))
 
     # if we are going to transform to FCI NOs, it doesn't make sense to transform to CISD NOs
     if cisd_nat_orb == 1 and fci_nat_orb == 0:
@@ -84,6 +92,19 @@ def adapt_vqe(geometry,
     hamiltonian_op = molecule.get_molecular_hamiltonian()
     hamiltonian = openfermion.transforms.get_sparse_operator(hamiltonian_op)
 
+    if fci_overlap:
+        e, fci_vec = openfermion.get_ground_state(hamiltonian)
+        fci_state = scipy.sparse.csc_matrix(fci_vec).transpose()
+        index = scipy.sparse.find(reference_ket)[0]
+        print(" Basis: ", basis)
+        print(' HF energy      %20.16f au' %(molecule.hf_energy))
+        if brueckner == 1:
+            print(' BCCD energy     %20.16f au' %(molecule.bccd_energy))
+        print(' FCI energy     %20.16f au' %e)
+        print(' <FCI|HF>       %20.16f' % np.absolute(fci_vec[index]))
+
+    print(' Orbitals')
+    print(molecule.canonical_orbitals)
     #Thetas
     parameters = []
 
@@ -101,13 +122,28 @@ def adapt_vqe(geometry,
         
     op_indices = []
     parameters = []
-    curr_state = 1.0*reference_ket
+    #curr_state = 1.0*reference_ket
     curr_energy = molecule.hf_energy
 
+    min_options = {'gtol': theta_thresh, 'disp':False}
     print(" Now start to grow the ansatz")
     if len(chk_ops) != 0:
         print(" Restarting from checkpoint file")
         print(" Operators previously added: %s" % chk_ops)
+        for i in chk_ops:
+            parameters.insert(0,0)
+            ansatz_ops.insert(0,pool.fermi_ops[i])
+            ansatz_mat.insert(0,pool.spmat_ops[i])
+
+        trial_model = tUCCSD(hamiltonian, ansatz_mat, reference_ket, parameters, fci_state)
+        opt_result = scipy.optimize.minimize(trial_model.energy, parameters, jac=trial_model.gradient, 
+                options = min_options, method = 'BFGS', callback=trial_model.callback)
+        parameters = list(opt_result['x'])
+        curr_state = trial_model.prepare_state(parameters)
+
+    else:
+        curr_state = 1.0*reference_ket
+
 
     for n_iter in range(len(chk_ops),adapt_maxiter):
 
@@ -179,6 +215,7 @@ def adapt_vqe(geometry,
             print(" Ansatz Growth Converged!")
             print(" Number of operators in ansatz: ", len(ansatz_ops))
             print(" *Finished: %20.12f" % trial_model.curr_energy)
+            print(" Overlap with FCI state: %20.12f" % abs(trial_model.overlap(parameters)))
             print(" -----------Final ansatz----------- ")
             print(" %4s %12s %18s" %("#","Coeff","Term"))
             for si in range(len(ansatz_ops)):
@@ -188,11 +225,12 @@ def adapt_vqe(geometry,
             break
         
         print(" Add operator %4i" %next_index)
-        parameters.insert(0,0)
+        parameters.insert(0,0.1)
         ansatz_ops.insert(0,pool.fermi_ops[next_index])
         ansatz_mat.insert(0,pool.spmat_ops[next_index])
         
-        trial_model = tUCCSD(hamiltonian, ansatz_mat, reference_ket, parameters)
+        #trial_model = tUCCSD(hamiltonian, ansatz_mat, reference_ket, parameters)
+        trial_model = tUCCSD(hamiltonian, ansatz_mat, reference_ket, parameters, fci_state)
         
         opt_result = scipy.optimize.minimize(trial_model.energy, parameters, jac=trial_model.gradient, 
                 options = min_options, method = 'BFGS', callback=trial_model.callback)
@@ -203,6 +241,7 @@ def adapt_vqe(geometry,
         delta_e = abs(curr_energy - molecule.fci_energy)
         print(" Finished: %20.12f" % trial_model.curr_energy)
         print(" Error from FCI energy: %20.12f" % delta_e)
+        print(" Overlap with FCI state: %20.12f" % abs(trial_model.overlap(parameters)))
         print(" -----------New ansatz----------- ")
         print(" %4s %12s %18s" %("#","Coeff","Term"))
         for si in range(len(ansatz_ops)):
@@ -215,6 +254,7 @@ def adapt_vqe(geometry,
             print(" *Finished in %5.3f s" % (time.time() - start_time))
             print(" Energy of the final state: %20.12f" % trial_model.curr_energy)
             print(" Error from FCI energy: %20.12f" % delta_e)
+            print(" Overlap with FCI state: %20.12f" % abs(trial_model.overlap(parameters)))
             print(" -----------Final ansatz----------- ")
             print(" %4s %12s %18s" %("#","Coeff","Term"))
             for si in range(len(ansatz_ops)):
@@ -1135,13 +1175,29 @@ def overlap_adapt_vqe(geometry,
         build_circuit   = True,
         chk_ops         = [],
         energy_thresh   = 1e-6,
+        fci_nat_orb     = 0,
+        cisd_nat_orb    = 0,
         psi4_filename   = "psi4_%12.12f"%random.random()
         ):
 # {{{
     start_time = time.time()
     molecule = openfermion.hamiltonians.MolecularData(geometry, basis, multiplicity, reference = 'rhf', hf_stability = 'none')
     molecule.filename = psi4_filename
-    molecule = openfermionpsi4.run_psi4(molecule, run_scf = 1, delete_input=1)
+    #molecule = openfermionpsi4.run_psi4(molecule, run_scf = 1, delete_input=1)
+    if cisd_nat_orb == 1:
+        cisd = 1
+    else:
+        cisd = 0
+    molecule = openfermionpsi4.run_psi4(molecule, 
+                run_scf = 1, 
+                run_mp2=0, 
+                run_cisd=cisd, 
+                run_ccsd = 0, 
+                run_bccd = brueckner, # Brueckner CCD
+                run_fci=1, 
+                fci_no = fci_nat_orb,
+                cisd_no = cisd_nat_orb,
+                delete_input=1)
     pool.init(molecule)
 
     #Build p-h reference and map it to JW transform
@@ -1155,11 +1211,19 @@ def overlap_adapt_vqe(geometry,
     hamiltonian_op = molecule.get_molecular_hamiltonian()
     hamiltonian = openfermion.transforms.get_sparse_operator(hamiltonian_op)
 
+    if cisd_nat_orb == 1 and fci_nat_orb == 0:
+        print(' Basis transformed to the CISD natural orbitals')
+    if fci_nat_orb == 1:
+        print(' Basis transformed to the FCI natural orbitals')
+    if brueckner == 1:
+        print(' Basis transformed to the Brueckner orbitals')
     e, fci_vec = openfermion.get_ground_state(hamiltonian)
     fci_state = scipy.sparse.csc_matrix(fci_vec).transpose()
     index = scipy.sparse.find(reference_ket)[0]
     print(" Basis: ", basis)
     print(' HF energy      %20.16f au' %(molecule.hf_energy))
+    if cisd_nat_orb == 1:
+        print(' CISD energy     %20.16f au' %molecule.cisd_energy)
     print(' FCI energy     %20.16f au' %e)
     print(' <FCI|HF>       %20.16f' % np.absolute(fci_vec[index]))
 
@@ -1257,7 +1321,7 @@ def overlap_adapt_vqe(geometry,
             break
 
         print(" Add operator %4i" %next_index)
-        parameters.insert(0,0)
+        parameters.insert(0,0.1)
         ansatz_ops.insert(0,pool.fermi_ops[next_index])
         ansatz_mat.insert(0,pool.spmat_ops[next_index])
 
