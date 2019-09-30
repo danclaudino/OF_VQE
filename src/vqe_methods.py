@@ -1097,6 +1097,7 @@ def ucc(geometry,
         k               = 1,
         random_params   = False,
         guess_params    = None,
+        optimize        = True,
         psi4_filename   = "psi4_%12.12f"%random.random()
         ):
 # {{{
@@ -1132,29 +1133,33 @@ def ucc(geometry,
     if guess_params != None:
         parameters = guess_params
     elif random_params:
-        parameters = np.random.rand(pool.n_ops*k)
+        parameters = np.random.rand(pool.n_ops*k) - np.random.rand(pool.n_ops*k)
     else:
         parameters = [0 for i in range(pool.n_ops*k)] 
         #parameters = [0]*pool.n_ops 
 
     pool.generate_SparseMatrix()
-    mat = [copy.copy(pool.spmat_ops[i]) for _ in range(k) for i in range(len(pool.spmat_ops))]
-    ops = [copy.copy(pool.fermi_ops[i]) for _ in range(k) for i in range(len(pool.fermi_ops))]
+    mat = [copy.deepcopy(pool.spmat_ops[i]) for _ in range(k) for i in range(len(pool.spmat_ops))]
+    ops = [copy.deepcopy(pool.fermi_ops[i]) for _ in range(k) for i in range(len(pool.fermi_ops))]
 
     print(" Number of parameters: %s" % len(parameters))
     print(" Trotter-Suzuki order: %s" % k)
     print(" Initial parameters: %s" % parameters)
     
-    ucc = UCC(hamiltonian, pool.spmat_ops, reference_ket, parameters)
+    ucc = UCC(hamiltonian, mat, reference_ket, parameters)
+    print(ucc.energy(parameters))
     
-    opt_result = scipy.optimize.minimize(ucc.energy, 
-                parameters, options = {'gtol': 1e-6, 'disp':True}, 
-                method = 'BFGS', callback=ucc.callback)
-    print(" Finished: %20.12f" % ucc.curr_energy)
-    print(" Time elapsed: %5.3f s" % (time.time() - start_time))
-    parameters = opt_result['x']
-    for p in parameters:
-        print(p)
+    if optimize:
+        opt_result = scipy.optimize.minimize(ucc.energy, 
+                    parameters, options = {'gtol': 1e-6, 'disp':True}, 
+                    method = 'BFGS', callback=ucc.callback)
+        print(" Finished: %20.12f" % ucc.curr_energy)
+        print(" Time elapsed: %5.3f s" % (time.time() - start_time))
+        parameters = opt_result['x']
+        for p in parameters:
+            print(p)
+    else:
+        pass
 
 # }}}
 
